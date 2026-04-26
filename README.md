@@ -36,8 +36,8 @@ Download [MovieLens-1M](https://grouplens.org/datasets/movielens/1m/) and put
 python main.py
 ```
 
-That's it. Both experiment configurations will train sequentially and a
-comparison table is printed at the end.
+That's it. All required-setting experiment configurations will train
+sequentially and a comparison table is printed at the end.
 
 ---
 
@@ -45,10 +45,15 @@ comparison table is printed at the end.
 
 1. Loads and preprocesses `ratings.dat` (filters rating ≥ 4, min 5 interactions per user)
 2. Builds chronological sequences and applies leave-one-out splits
-3. Trains `config_small` (64-dim, 2 blocks, 2 heads, len=50)
-4. Trains `config_deeper` (128-dim, 3 blocks, 4 heads, len=100)
-5. Evaluates both on test set with **full ranking** (as required by the assignment)
-6. Prints a comparison table across all four architectural dimensions
+3. Trains `config_base` (64-dim, 2 blocks, 2 heads, len=50)
+4. Trains one-setting-at-a-time variants:
+   - `setting_num_blocks` (3 blocks)
+   - `setting_hidden_dim` (128 hidden dim)
+   - `setting_num_heads` (4 heads)
+   - `setting_max_seq_len` (len=100)
+5. Trains `config_deeper` (128-dim, 3 blocks, 4 heads, len=100)
+6. Evaluates all configurations on test set with **full ranking** (as required by the assignment)
+7. Prints a comparison table across all four architectural dimensions
 
 ---
 
