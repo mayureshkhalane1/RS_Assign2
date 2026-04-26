@@ -34,7 +34,7 @@ def run_train_loop(
     data_bundle : SequenceDataBundle
         Used by the evaluator to mask seen items.
     config : dict
-        Must contain keys: ``lr``, ``weight_decay``, ``epochs``,
+        Must contain: ``lr``, ``weight_decay``, ``epochs``,
         ``early_stop_patience``, ``grad_clip``, ``eval_mode``,
         ``eval_num_negatives``, ``seed``.
     device : torch.device

@@ -35,17 +35,16 @@
 \email{x.he.8@umail.leidenuniv.nl}
 
 \begin{abstract}
-This report presents an implementation of SASRec trained and evaluated on
-MovieLens~1M under full-ranking evaluation. A controlled ablation varies each
-of four architectural dimensions --- hidden size, number of attention blocks,
-number of heads, and sequence length --- one at a time against a shared
-baseline, plus a combined configuration that sets all dimensions to their larger
-values. Hidden size is the most impactful single dimension (+15.4\% NDCG@10
-over baseline), while adding heads alone hurts performance when the per-head
-dimension becomes too small (16 dims/head at H=64). The combined configuration
-achieves a test Recall@10 of 0.2007 and NDCG@10 of 0.1032. Neither model
-triggered early stopping at 50 epochs, suggesting the training budget was the
-binding constraint rather than overfitting.
+This report presents an implementation of SASRec trained on MovieLens~1M and
+evaluated under full-ranking. A controlled ablation varies each of four
+architectural dimensions --- hidden size, number of attention blocks, number of
+heads, and sequence length --- one at a time against a shared baseline, plus a
+combined configuration that sets all dimensions to their larger values. Hidden
+size is the most impactful single dimension (+24.2\% validation NDCG@10 over
+baseline), while increasing heads alone hurts when the per-head dimensionality
+falls to 16. The combined configuration achieves a test Recall@10 of 0.2007 and
+NDCG@10 of 0.1032. Neither model triggered early stopping at 50 epochs,
+indicating the training budget was the binding constraint.
 \end{abstract}
 
 \maketitle
@@ -54,14 +53,14 @@ binding constraint rather than overfitting.
 \section{Introduction}
 
 Matrix factorization compresses a user's entire interaction history into a fixed
-vector. Sequential recommendation models take a different approach: they treat
-the history as an ordered sequence and learn which past items matter most for
-predicting the next one, making temporal order a first-class feature rather than
+vector. Sequential recommendation takes a different approach: it treats the
+history as an ordered sequence and learns which past items are most predictive
+of the next one, making temporal order a first-class feature rather than
 something to be averaged away.
 
 SASRec~\cite{kang2018self} addresses next-item prediction with a
 Transformer-style architecture~\cite{vaswani2017attention}. Stacked multi-head
-self-attention blocks process the interaction sequence with a causal mask, so
+self-attention blocks process the interaction sequence under a causal mask, so
 each position attends to all preceding items but not future ones. The model is
 implemented in PyTorch and evaluated on MovieLens~1M~\cite{harper2015movielens}
 using full-ranking NDCG@10, NDCG@20, Recall@10, and Recall@20.
@@ -70,24 +69,24 @@ using full-ranking NDCG@10, NDCG@20, Recall@10, and Recall@20.
 \section{Data Preprocessing}
 
 The MovieLens~1M dataset contains 1,000,209 ratings from 6,040 users on 3,706
-movies. Each line has the format \texttt{userId::movieId::rating::timestamp}.
+movies in the format \texttt{userId::movieId::rating::timestamp}.
 
-Ratings below 4.0 are discarded; only higher-rated films are kept as positive
-interactions. The retained interactions are sorted by timestamp for each user,
-giving a chronological item sequence. Users with fewer than five interactions
-are removed, since the split described below requires at least three items and
-very short sequences provide little sequential signal.
+Ratings below 4.0 are discarded; only higher-rated interactions are kept as
+implicit positive feedback. Each user's retained interactions are sorted by
+timestamp to form a chronological item sequence. Users with fewer than five
+interactions are removed, since the split below requires at least three items
+and very short sequences provide little sequential signal.
 
 User and item IDs are remapped to contiguous integers starting from 1; index 0
 is reserved for padding. For a user sequence of length $n$, the first $n-2$
-items form the training sequence, item $n-1$ is used for validation, and item
-$n$ is the test target. The complete interaction history per user is stored and
-used at evaluation time to exclude already-seen items from the candidate set.
+items form the training sequence, item $n-1$ is the validation target, and item
+$n$ is the test target. The complete interaction history per user is stored to
+exclude already-seen items from the candidate set at evaluation time.
 
-Training samples are constructed token-wise. For each non-padding position, the
-input is the item at that position and the target is the next item. Sequences
-are left-padded with zeros to a fixed length $L$; padding positions do not
-contribute to the training loss.
+Training samples are constructed token-wise: the input at each non-padding
+position is the current item and the target is the next item. Sequences are
+left-padded to a fixed length $L$; padding positions contribute nothing to the
+training loss.
 
 
 \section{Model Architecture}
@@ -95,14 +94,14 @@ contribute to the training loss.
 \subsection{Embeddings}
 
 Each item is mapped to an $H$-dimensional vector via a learnable embedding table
-of size $(N+1) \times H$, where index 0 is fixed to zero (padding). Position
-embeddings of the same size are added elementwise:
+of size $(N+1) \times H$, where index 0 is fixed to zero. Position embeddings
+of the same dimension are added elementwise:
 
 \begin{align}
   \mathbf{x}_t = \mathbf{e}_{i_t} + \mathbf{p}_t, \quad t = 1, \dots, L.
 \end{align}
 
-Padding positions are zeroed out before the first block and after each
+Padding positions are explicitly zeroed before the first block and after each
 subsequent block. Residual connections can restore non-zero values at padding
 slots even when the attention mask prevents information flow, so the explicit
 zeroing is necessary.
@@ -110,22 +109,22 @@ zeroing is necessary.
 \subsection{Self-Attention Blocks}
 
 The model stacks $B$ identical blocks. Following Xiong et al.~\cite{xiong2020layer},
-layer normalisation is applied before each sub-layer (pre-LN), which stabilises
-gradient flow in deeper networks.
+layer normalisation is applied \emph{before} each sub-layer (pre-LN), which
+stabilises gradient flow in deeper networks.
 
-The self-attention sub-layer uses a causal mask: entry $(i, j)$ is blocked when
-$j > i$, so position $i$ cannot attend to any future position. A key-padding
-mask additionally prevents all positions from attending to padding tokens.
-
-The point-wise feedforward sub-layer is:
+The self-attention sub-layer uses a causal mask: entry $(i,j)$ is blocked when
+$j > i$, preventing position $i$ from attending to any future position. A
+key-padding mask additionally prevents all positions from attending to padding
+tokens. The point-wise feedforward sub-layer is:
 
 \begin{align}
   \text{FFN}(\mathbf{x}) = W_2 \cdot \text{GELU}(W_1 \mathbf{x} + b_1) + b_2,
 \end{align}
 
-where the inner dimension is $4H$. GELU~\cite{hendrycks2016gaussian} replaces
-ReLU; it avoids the hard zero gate, which tends to improve training for
-attention-based models. Both sub-layers use residual connections and dropout.
+where the inner dimension is $4H$. GELU~\cite{hendrycks2016gaussian} is used
+instead of ReLU; it avoids the hard zero gate, which improves training stability
+for attention-based models. Both sub-layers include residual connections and
+dropout.
 
 \subsection{Prediction}
 
@@ -142,8 +141,8 @@ user's current preference. Candidate items are scored by dot product:
 
 \subsection{Objective}
 
-The model is trained with binary cross-entropy and one sampled negative per
-positive. At each non-padding position $t$:
+The model is trained with binary cross-entropy and one uniformly sampled
+negative per positive. At each non-padding position $t$:
 
 \begin{align}
   \mathcal{L} = -\sum_{t:\, i_{t+1} \neq 0}
@@ -155,39 +154,41 @@ positive. At each non-padding position $t$:
 
 where $j_t$ is drawn uniformly from items the user has not interacted with.
 
-\subsection{Optimisation and Early Stopping}
+\subsection{Optimisation}
 
 Adam~\cite{kingma2015adam} is used with learning rate $10^{-3}$ and weight
-decay $10^{-5}$. Gradient norms are clipped at 5.0. Training runs for up to
-50 epochs; if validation NDCG@10 does not improve for five consecutive epochs,
-training stops and the best checkpoint is used for test evaluation.
+decay $10^{-5}$. Gradient norms are clipped at 5.0. Training runs for up to 50
+epochs; if validation NDCG@10 does not improve for five consecutive epochs,
+training stops early and the best checkpoint is used for test evaluation.
 
 \subsection{Configurations}
 
 Table~\ref{tab:configs} lists all six configurations. The baseline uses the
-smaller value for each dimension. Four ablation settings each change exactly one
-dimension while holding the rest at baseline, allowing the contribution of each
-dimension to be isolated. The combined configuration sets all four dimensions to
-their larger values.
+smaller value for each dimension. The four ablation settings each change exactly
+one dimension while holding the rest at baseline, allowing the contribution of
+each dimension to be read directly from the results. The combined configuration
+sets all four dimensions to their larger values.
 
 \begin{table}[h]
 \centering
-\caption{Experimental configurations. Cells that differ from the baseline are
-shown in \textbf{bold}.}
+\caption{Experimental configurations. Bold cells differ from the baseline.}
 \label{tab:configs}
 \begin{tabular}{lcccc}
 \toprule
-Configuration       & $H$  & $B$ & Heads & $L$  \\
+Configuration        & $H$   & $B$ & Heads & $L$   \\
 \midrule
-config\_base         & 64   & 2   & 2     & 50   \\
-setting\_num\_blocks  & 64   & \textbf{3}   & 2     & 50   \\
-setting\_hidden\_dim  & \textbf{128}  & 2   & 2     & 50   \\
-setting\_num\_heads   & 64   & 2   & \textbf{4}     & 50   \\
-setting\_max\_seq\_len & 64   & 2   & 2     & \textbf{100}  \\
-config\_deeper       & \textbf{128}  & \textbf{3}   & \textbf{4}     & \textbf{100}  \\
+config\_base          & 64    & 2   & 2     & 50    \\
+setting\_num\_blocks   & 64    & \textbf{3}   & 2     & 50    \\
+setting\_hidden\_dim   & \textbf{128}  & 2   & 2     & 50    \\
+setting\_num\_heads    & 64    & 2   & \textbf{4}     & 50    \\
+setting\_max\_seq\_len  & 64    & 2   & 2     & \textbf{100}  \\
+config\_deeper        & \textbf{128}  & \textbf{3}   & \textbf{4}     & \textbf{100}  \\
 \bottomrule
 \end{tabular}
 \end{table}
+
+Learning rate, weight decay, batch size, and dropout are identical across all
+configurations to isolate the architectural changes.
 
 
 \section{Evaluation and Results}
@@ -195,46 +196,50 @@ config\_deeper       & \textbf{128}  & \textbf{3}   & \textbf{4}     & \textbf{1
 \subsection{Protocol}
 
 Evaluation uses full ranking: the model scores all items not previously seen by
-each user, and the held-out target is ranked within that set. All items in a
-user's history are masked with $-\infty$ before ranking, except the target
-itself, so the model is not penalised for assigning low scores to items it has
-never been asked to predict.
+each user, and the held-out target is ranked within that set. Items in the
+user's full history are masked with $-\infty$ before ranking, except for the
+target itself, so the model is not penalised for assigning low scores to items
+it was never asked to predict.
 
 Recall@$K$ is 1 if the target appears in the top $K$ positions, else 0.
-NDCG@$K$ discounts by rank:
+NDCG@$K$ additionally discounts by rank:
 
 \begin{align}
   \text{NDCG@}K =
   \begin{cases}
     \dfrac{1}{\log_2(\text{rank} + 2)} & \text{if rank} < K, \\
-    0 & \text{otherwise,}
+    0 & \text{otherwise.}
   \end{cases}
 \end{align}
 
-where rank is 0-based.
+Sampled evaluation has been shown to produce rankings that differ from full
+evaluation and should not be used for final
+reporting~\cite{krichene2020sampled}, so full ranking is used throughout.
 
 \subsection{Results}
 
 Table~\ref{tab:results} reports validation NDCG@10 used for model selection and
-test metrics for all six configurations. Five of the six models trained for the
-full 50 epochs; \texttt{setting\_num\_heads} was the only one to trigger early
-stopping, exiting at epoch 49.
+all test metrics. Five of the six configurations trained for the full 50 epochs.
+\texttt{setting\_num\_heads} was the only exception, stopping at epoch 49 --- the
+only configuration where performance degraded relative to baseline.
 
 \begin{table*}[t]
 \centering
-\caption{Full-ranking evaluation on the MovieLens~1M test set.
-The best value in each column is \textbf{bold}.
-Arrows indicate direction relative to \texttt{config\_base}.}
+\caption{%
+  Full-ranking test evaluation on MovieLens~1M.
+  Percentage changes are relative to \texttt{config\_base}.
+  The best value in each column is \textbf{bold}.
+}
 \label{tab:results}
 \begin{tabular}{lccccc}
 \toprule
 Configuration        & Val NDCG@10 & Recall@10 & Recall@20 & NDCG@10 & NDCG@20 \\
 \midrule
-config\_base          & 0.0880 & 0.1642 & 0.2504 & 0.0845 & 0.1062 \\
-setting\_num\_blocks   & 0.0899 {\small (+2.2\%)} & 0.1672 & 0.2580 & 0.0861 & 0.1090 \\
-setting\_hidden\_dim   & 0.1093 {\small (+24.2\%)} & 0.1833 & 0.2743 & 0.0973 & 0.1202 \\
-setting\_num\_heads    & 0.0844 {\small ($-$4.1\%)} & 0.1501 & 0.2368 & 0.0760 & 0.0978 \\
-setting\_max\_seq\_len  & 0.0957 {\small (+8.8\%)} & 0.1755 & 0.2744 & 0.0905 & 0.1154 \\
+config\_base          & 0.0880           & 0.1642    & 0.2504    & 0.0845  & 0.1062  \\
+setting\_num\_blocks   & 0.0899 {\small (+2.2\%)}  & 0.1672    & 0.2580    & 0.0861  & 0.1090  \\
+setting\_hidden\_dim   & 0.1093 {\small (+24.2\%)} & 0.1833    & 0.2743    & 0.0973  & 0.1202  \\
+setting\_num\_heads    & 0.0844 {\small ($-$4.1\%)} & 0.1501    & 0.2368    & 0.0760  & 0.0978  \\
+setting\_max\_seq\_len  & 0.0957 {\small (+8.8\%)}  & 0.1755    & 0.2744    & 0.0905  & 0.1154  \\
 config\_deeper        & \textbf{0.1131} {\small (+28.5\%)} & \textbf{0.2007} & \textbf{0.3061} & \textbf{0.1032} & \textbf{0.1298} \\
 \bottomrule
 \end{tabular}
@@ -243,73 +248,69 @@ config\_deeper        & \textbf{0.1131} {\small (+28.5\%)} & \textbf{0.2007} & \
 \subsection{Per-Dimension Analysis}
 
 \textbf{Hidden size} is the most impactful single change. Doubling $H$ from 64
-to 128 improves validation NDCG@10 by 24.2\% and test NDCG@10 by 15.2\%. Wider
-embeddings give the model more capacity to differentiate items and to encode
-complex sequential patterns inside the FFN layers, which scale as $4H$.
+to 128 improves validation NDCG@10 by 24.2\% and test NDCG@10 by 15.1\%. Wider
+embeddings give the model more capacity to differentiate items and the FFN
+layers scale as $4H$, so the benefit compounds.
 
 \textbf{Sequence length} is the second largest contributor at +8.8\% on
 validation NDCG@10. Extending $L$ from 50 to 100 allows the model to condition
-on more of each user's history. On MovieLens~1M many users have more than 50
-positive ratings, so the additional context is not wasted.
+on more of each user's history. Many MovieLens~1M users have more than 50
+positive ratings, so the additional context is genuinely useful.
 
 \textbf{Number of blocks} provides a modest but consistent gain of +2.2\%.
-Adding a third attention block allows one more layer of non-linear transformation,
-but the improvement is small relative to hidden size, suggesting that two blocks
-are already sufficient to capture most inter-item dependencies at this scale.
+Adding a third attention block allows one more layer of non-linear
+transformation, but the improvement is small relative to hidden size, suggesting
+that two blocks already capture most inter-item dependencies at this dataset
+scale.
 
 \textbf{Number of heads} is the only dimension where increasing the value hurts
-performance, dropping validation NDCG@10 by 4.1\%. The cause is the per-head
-dimensionality: at $H = 64$ with four heads, each head operates on a 16-dimensional
-subspace. This is likely too small to learn meaningful attention patterns, and
-the head projection matrices add parameters without adding useful capacity. The
-degradation is clear enough that \texttt{setting\_num\_heads} also triggered
-early stopping at epoch 49, unlike every other configuration. When heads are
-increased in the combined \texttt{config\_deeper} setting, $H$ is simultaneously
-doubled to 128, giving each head a 32-dimensional subspace, which is sufficient
-to recover the benefit.
+performance, dropping validation NDCG@10 by 4.1\%. At $H = 64$ with four heads,
+each head operates on a 16-dimensional subspace --- too narrow to learn
+meaningful attention patterns. The extra projection matrices add parameters
+without useful capacity. This is also the only configuration to trigger early
+stopping, at epoch 49. When heads are increased in \texttt{config\_deeper},
+$H$ is simultaneously doubled to 128, giving each head 32 dimensions, which is
+sufficient to recover the benefit.
 
 \textbf{Combined configuration.} \texttt{config\_deeper} outperforms the
-baseline by 28.5\% on validation NDCG@10, which is larger than any single-
-dimension gain. The head dimension interaction above explains part of this: the
-gain from adding heads only materialises when $H$ is large enough. The remaining
-uplift likely reflects non-additive interactions between depth, width, and
-context length that the single-dimension ablations cannot capture.
+baseline by 28.5\% on validation NDCG@10, larger than any single-dimension
+gain. The head-dimension interaction explains part of this: additional heads
+only help when $H$ is large enough to support them. The remaining uplift likely
+reflects non-additive interactions between depth, width, and context length that
+the single-dimension ablations cannot capture individually.
 
 
 \section{Discussion}
 
-The controlled ablation yields two results that would not be visible from a
-two-configuration comparison. First, hidden size dominates the other three
-dimensions at this dataset scale. Second, increasing heads without also
-increasing the hidden size makes things worse, not better. Both findings have
-direct practical implications: on a compute budget, widening the model is a
-safer bet than deepening it or adding heads.
-
 The implementation uses pre-layer normalisation, causal masking, $4\times$ FFN
-expansion, and GELU activations. Full-ranking evaluation is used throughout;
-sampled evaluation has been shown to produce different rankings than full
-evaluation and should not be used for final reporting~\cite{krichene2020sampled}.
+expansion, and GELU activations. Full-ranking evaluation is used throughout to
+avoid the biases introduced by sampled evaluation.
 
-Three improvements stand out as the most direct next steps. Training longer is
-the clearest one: five of six configurations were still improving at epoch 50,
-and a cosine learning rate schedule with a longer budget would likely push
-performance up across all settings. Negative sampling is a second avenue;
-drawing negatives uniformly means the model rarely sees items close to the
-decision boundary, and popularity-weighted or in-batch negatives would sharpen
-the gradients. Finally, the head-size interaction suggests that a joint sweep
-over $H$ and the number of heads (keeping $H / \text{heads}$ above 32) would
-be more informative than sweeping them independently.
+The ablation yields two results that a two-configuration comparison would miss.
+Hidden size dominates the other three dimensions at this scale, and increasing
+heads without widening the model makes things worse. Both findings have direct
+practical implications: on a fixed compute budget, widening the model is a
+safer investment than deepening it or adding heads.
+
+Three improvements stand out. First, training longer: five of six configurations
+were still improving at epoch 50, and a cosine learning rate schedule with a
+longer budget would likely push all numbers up. Second, harder negatives:
+uniform sampling means the model rarely sees items close to the decision
+boundary; popularity-weighted or in-batch negatives would provide sharper
+gradients. Third, a joint sweep over $H$ and the number of heads keeping
+$H / \text{heads} \geq 32$ would give a cleaner picture of the head-size
+interaction than the current independent ablation.
 
 
 \section{Conclusion}
 
 Six SASRec configurations are compared on MovieLens~1M under full ranking. The
 ablation shows that hidden size is the most valuable single dimension to scale,
-while increasing the number of heads without increasing the hidden dimension
+while increasing heads without a corresponding increase in hidden dimension
 actively hurts performance. The combined configuration achieves Recall@10 of
-0.2007 and NDCG@10 of 0.1032. Neither the ablation settings nor the combined
-model converged within 50 epochs, so the training budget --- not model capacity
---- appears to be the binding constraint at this scale.
+0.2007 and NDCG@10 of 0.1032. No configuration converged within 50 epochs, so
+the training budget rather than model capacity appears to be the current
+bottleneck.
 
 
 \bibliographystyle{ACM-Reference-Format}

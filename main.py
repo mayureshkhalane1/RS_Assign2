@@ -7,7 +7,7 @@ Usage
 Six configurations are run sequentially. Four isolate one architectural
 dimension at a time against a shared baseline:
 
-    config_base         -- baseline (H=64,  B=2, heads=2, L=50)
+    config_base         -- baseline (H=64, B=2, heads=2, L=50)
     setting_num_blocks  -- B=3  (all others at baseline)
     setting_hidden_dim  -- H=128 (all others at baseline)
     setting_num_heads   -- heads=4 (all others at baseline)
@@ -191,10 +191,10 @@ def print_comparison_table(results: List[Dict[str, Any]]) -> None:
     print("=" * 80 + "\n")
 
     print("Ablation dimensions:")
-    print("  setting_num_blocks  -- B=3,    others at baseline")
-    print("  setting_hidden_dim  -- H=128,  others at baseline")
+    print("  setting_num_blocks  -- B=3,     others at baseline")
+    print("  setting_hidden_dim  -- H=128,   others at baseline")
     print("  setting_num_heads   -- heads=4, others at baseline")
-    print("  setting_max_seq_len -- L=100,  others at baseline")
+    print("  setting_max_seq_len -- L=100,   others at baseline")
     print("  config_deeper       -- all dimensions increased")
 
 
@@ -223,11 +223,9 @@ def main() -> None:
     }
 
     experiment_configs: Dict[str, Dict[str, Any]] = {
-        # Baseline — all dimensions at their smaller values
         "config_base": {
             **base_config,
         },
-        # Ablations — one dimension changed at a time
         "setting_num_blocks": {
             **base_config,
             "num_blocks": 3,
@@ -235,18 +233,16 @@ def main() -> None:
         "setting_hidden_dim": {
             **base_config,
             "hidden_dim": 128,
-            # num_heads=2 still divides 128, so no change needed here
         },
         "setting_num_heads": {
             **base_config,
             "num_heads": 4,
-            # hidden_dim=64, 4 heads → 16 dims/head (valid but tight)
+            # hidden_dim=64 with 4 heads → 16 dims/head
         },
         "setting_max_seq_len": {
             **base_config,
             "max_seq_len": 100,
         },
-        # Combined — all dimensions at their larger values
         "config_deeper": {
             **base_config,
             "hidden_dim": 128,
