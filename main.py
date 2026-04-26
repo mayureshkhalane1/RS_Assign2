@@ -5,12 +5,16 @@ Usage
 -----
     python main.py
 
-Two configurations are run by default and compared in a summary table:
+The default run evaluates a required-settings suite and compares:
 
-    config_small   — hidden_dim=64,  num_blocks=2, num_heads=2, max_len=50
-    config_deeper  — hidden_dim=128, num_blocks=3, num_heads=4, max_len=100
+    config_base          — baseline
+    setting_num_blocks   — varies number of blocks
+    setting_hidden_dim   — varies hidden size
+    setting_num_heads    — varies attention heads
+    setting_max_seq_len  — varies maximum sequence length
+    config_deeper        — combined higher-capacity setting
 
-The comparison covers all four dimensions required by the assignment rubric:
+The suite covers all four architectural dimensions required by the assignment:
     1. number of self-attention blocks
     2. hidden size
     3. number of attention heads
@@ -249,12 +253,28 @@ def main() -> None:
     # Experiment grid — varies one or more architectural dimensions
     # ------------------------------------------------------------------
     experiment_configs: Dict[str, Dict[str, Any]] = {
-        "config_small": {
+        "config_base": {
             **base_config,
             "hidden_dim":  64,
             "num_blocks":  2,
             "num_heads":   2,
             "max_seq_len": 50,
+        },
+        "setting_num_blocks": {
+            **base_config,
+            "num_blocks": 3,
+        },
+        "setting_hidden_dim": {
+            **base_config,
+            "hidden_dim": 128,
+        },
+        "setting_num_heads": {
+            **base_config,
+            "num_heads": 4,
+        },
+        "setting_max_seq_len": {
+            **base_config,
+            "max_seq_len": 100,
         },
         "config_deeper": {
             **base_config,
