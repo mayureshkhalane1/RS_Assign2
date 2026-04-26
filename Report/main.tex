@@ -1,0 +1,108 @@
+\documentclass[sigconf]{acmart}
+\setcopyright{none}
+\settopmatter{printacmref=false}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{amsmath}
+\usepackage{xcolor}
+
+\AtBeginDocument{%
+  \providecommand\BibTeX{{%
+    \normalfont B\kern-0.5em{\scshape i\kern-0.25em b}\kern-0.8em\TeX}}}
+
+\copyrightyear{}
+\acmYear{}
+\acmConference[]{}{}{}
+\acmISBN{}
+\acmDOI{}
+
+\begin{document}
+
+\title{Assignment 1: Neural Collaborative Filtering (NCF)}
+
+\author{Mayuresh Khalane (s4714067)}
+\affiliation{%
+  \institution{Leiden University}
+  \city{Leiden}
+  \country{Netherlands}}
+\email{m.j.khalane@umail.leidenuniv.nl}
+
+\author{Xing He (s4707443)}
+\affiliation{%
+  \institution{Leiden University}
+  \city{Leiden}
+  \country{Netherlands}}
+\email{x.he.8@umail.leidenuniv.nl}
+
+\begin{abstract}
+...
+\end{abstract}
+
+\maketitle
+
+
+\section{Introduction}
+
+This work implements a sequential recommendation model based on the self-attention architecture of SASRec. The objective is to predict the next item a user will interact with given a sequence of historical interactions. Unlike traditional matrix factorization approaches that treat user preferences as static, sequential recommendation models explicitly capture temporal dependencies and evolving user interests.\\
+SASRec models user behavior as an ordered sequence and applies a Transformer-style self-attention mechanism to learn dependencies among items. This allows the model to dynamically focus on relevant past interactions when predicting the next item. The implementation is built in PyTorch and evaluated on the MovieLens 1M dataset using ranking-based metrics, specifically NDCG@10, NDCG@20, Recall@10, and Recall@20.\\
+The system is designed with modular components for data processing, model definition, training, and evaluation, enabling controlled experimentation across different architectural configurations.
+
+\section{Data Processing}
+
+The dataset used in this work is the MovieLens 1M dataset, which contains user interactions in this format:\\ \texttt{userId::movieId::rating::timestamp}.\\ 
+The raw ratings are first converted into implicit feedback by retaining only interactions with rating greater than or equal to 4, while all other interactions are discarded. This conversion aligns the data with the implicit feedback setting assumed by SASRec.\\
+For each user, interactions are sorted in ascending order of timestamp to construct chronological sequences. Users with fewer than five interactions are removed to ensure sufficient sequential context for training and evaluation. After filtering, user and item identifiers are remapped to contiguous integer indices starting from 1, with index 0 reserved for padding.\\
+A leave-one-out splitting strategy is applied to each user sequence. Given a sequence of length $n$, the first $n-2$ items are used for training, the $(n-1)$-th item is used for validation, and the $n$-th item is used for testing. This ensures that the model is evaluated on its ability to predict future interactions rather than reconstruct known ones.\\
+Training samples are constructed in a token-wise manner. For each position in a sequence, the model takes a prefix of items as input and predicts the subsequent item. Sequences are either truncated or left-padded to a fixed maximum length $L$. Padding tokens are masked during training to avoid affecting the loss computation.
+
+\section{Model Architecture}
+
+The model follows the SASRec architecture, which is composed of embedding layers, stacked self-attention blocks, and a final prediction layer. Each item is represented by a learnable embedding vector, and positional embeddings are added to encode the order of interactions within the sequence.\\
+The input sequence $s = [i_1, i_2, \dots, i_L]$ is transformed into a sequence of embeddings, where each position is represented as the sum of its item embedding and positional embedding. This sequence is passed through multiple stacked self-attention blocks.\\
+Each self-attention block consists of a multi-head self-attention layer followed by a point-wise feedforward network. Residual connections and layer normalization are applied around both the attention and feedforward components to stabilize training. Dropout is used in both layers to reduce overfitting.\\
+A causal attention mask is applied in the self-attention mechanism to ensure that each position can only attend to previous positions in the sequence. This prevents information leakage from future interactions during training and aligns the model with the next-item prediction objective.\\
+After passing through the stacked attention blocks, the final hidden representation at the last position is used as the sequence representation. The model computes relevance scores by taking the dot product between this representation and candidate item embeddings. These scores are used both for training and ranking during evaluation.
+
+\section{Training and Tuning}
+
+The model is trained using a binary cross-entropy loss with negative sampling. For each positive interaction, a negative item is sampled uniformly from the set of items that the user has not interacted with. The loss encourages the model to assign higher scores to positive items than to sampled negative items.\\
+The optimization is performed using the Adam optimizer with a fixed learning rate. Gradient clipping is applied to stabilize training and prevent exploding gradients. Training proceeds for a fixed number of epochs with early stopping based on validation NDCG@10. The model parameters corresponding to the best validation performance are retained for final evaluation.\\
+Two configurations are evaluated to study the impact of model capacity. The first configuration uses a smaller hidden dimension, fewer attention blocks, and shorter maximum sequence length. The second configuration increases the hidden dimension, number of attention blocks, number of attention heads, and sequence length to provide a higher-capacity model. All other hyperparameters, including learning rate, dropout rate, and batch size, are kept constant to isolate the effect of these architectural changes.
+
+\section{Evaluation and Results}
+
+The model is evaluated using ranking-based metrics. For each user, the model is provided with a sequence prefix and asked to rank the true next item among a set of candidate items. Two evaluation protocols are supported: sampled ranking, where the true item is ranked among a set of randomly sampled negative items, and full ranking, where the true item is ranked among all items not previously interacted with by the user.\\
+Recall@K measures whether the true next item appears in the top $K$ ranked items, while NDCG@K additionally accounts for the position of the correct item in the ranking. Higher values indicate better performance.\\
+The results for the two configurations are summarized in Table~\ref{tab:results}. The table reports validation NDCG@10 for model selection and test metrics for final evaluation.
+
+\begin{table*}[H]
+\centering
+\caption{Comparison of model configurations}
+\label{tab:results}
+\begin{tabular}{lcccccc}
+\hline
+Config & Val NDCG@10 & Recall@10 & Recall@20 & NDCG@10 & NDCG@20 \\
+\hline
+Small & XXX & XXX & XXX & XXX & XXX \\
+Deeper & XXX & XXX & XXX & XXX & XXX \\
+\hline
+\end{tabular}
+\end{table*}
+
+The deeper configuration is expected to achieve higher performance due to its increased representational capacity, although it may also require more careful tuning to avoid overfitting.
+
+\section{Discussion and Conclusion}
+
+The results demonstrate the effectiveness of self-attention mechanisms for sequential recommendation tasks. By modeling dependencies across the entire sequence, SASRec can capture both short-term and long-term user preferences. The use of causal masking ensures that the model respects temporal order and avoids information leakage.
+
+Increasing the model depth and embedding size generally improves performance, as it allows the model to learn more complex interaction patterns. However, this also increases computational cost and may lead to diminishing returns if the dataset size is limited.
+
+One limitation of the current implementation is the reliance on uniform negative sampling, which may not provide sufficiently hard negatives. More advanced sampling strategies could improve training efficiency and model performance. Additionally, the use of sampled evaluation instead of full ranking may introduce variance in metric estimation.
+
+Future work could explore alternative architectures, such as incorporating side information or using contrastive learning objectives. Another potential direction is to investigate efficient full-ranking evaluation methods to obtain more reliable performance estimates.
+
+Overall, the implementation successfully reproduces the core components of SASRec and demonstrates its applicability to sequential recommendation tasks on real-world datasets.
+
+
+
+\end{document}

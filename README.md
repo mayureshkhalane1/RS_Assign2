@@ -1,245 +1,125 @@
-# SASRec Sequential Recommendation 
+# SASRec Sequential Recommendation
 
-This project implements a **sequential recommendation model** based on SASRec using PyTorch.  
-The goal is to predict the next item a user will interact with based on their historical behavior sequence.
+Sequential recommendation model based on **SASRec** (Kang & McAuley, 2018),
+trained and evaluated on **MovieLens-1M**.
 
 ---
 
-## Project Structure
+## Quick Start
+
+### 1. Install dependencies
+
+```bash
+pip install torch numpy
+```
+
+Python ≥ 3.10 and PyTorch ≥ 2.0 recommended.
+
+### 2. Place the dataset
+
+Download [MovieLens-1M](https://grouplens.org/datasets/movielens/1m/) and put
+`ratings.dat` in the same directory as `main.py`.
 
 ```
 .
-├── ratings.dat # MovieLens 1M dataset (required)
-├── dataset.py # Data preprocessing + dataset construction
-├── model.py # SASRec model implementation
-├── train.py # Training loop + optimization
-├── eval.py # Evaluation metrics and ranking logic
-├── main.py # Experiment orchestration
-└── README.md
-```
----
-
-## Dataset
-
-The dataset file `ratings.dat` must be placed in the root directory.
-
-Format:
-```
-userId::movieId::rating::timestamp
+├── ratings.dat        ← required
+├── dataset.py
+├── model.py
+├── train.py
+├── eval.py
+└── main.py
 ```
 
-### Preprocessing Steps
-
-1. **Implicit feedback conversion**
-   - Keep interactions where `rating >= 4`
-   - Discard all other interactions
-
-2. **Chronological ordering**
-   - Sort each user’s interactions by timestamp
-
-3. **User filtering**
-   - Remove users with fewer than 5 interactions
-
-4. **ID remapping**
-   - Map user IDs and item IDs to contiguous integers
-   - `0` is reserved for padding
-
-5. **Leave-one-out split**
-   For each user sequence:
-
-[i1, i2, i3, ..., i(n-2), i(n-1), i(n)]
-
-Train: [i1, i2, ..., i(n-2)]
-
-Valid: i(n-1)
-
-Test: i(n)
-
-
----
-
-## Processed Data Representation
-
-### Training Data (token-level)
-
-Each user sequence is converted into multiple training signals:
-
-Example:
-
-User sequence: [10, 23, 45, 67]
-
-Input: [0, 10, 23, 45]
-
-Pos: [0, 23, 45, 67]
-
-Neg: [0, n1, n2, n3] (random negatives)
-
-```
-- Input = sequence prefix
-- Pos = next item
-- Neg = randomly sampled item not in user history
-```
-
-
----
-
-### Evaluation Data
-
-For each user:
-
-- Validation:
-```
-Input: train sequence
-Target: validation item
-```
-
-- Test:
-```
-Input: train + validation
-Target: test item
-```
-
----
-
-## Model Architecture (SASRec)
-
-The model follows a Transformer-style architecture:
-
-### 1. Embedding Layer
-- Item embeddings: map item IDs → vectors
-
-- Positional embeddings: encode sequence order
-
-
-x = item_embedding + positional_embedding
-
-
----
-
-### 2. Self-Attention Blocks
-
-Each block contains:
-```
-- Multi-head self-attention
-- Causal mask (prevents future leakage)
-- Residual connection
-- Layer normalization
-- Feedforward network
-- Dropout
-```
----
-
-### 3. Causal Mask
-
-Ensures:
-
-position t can only attend to positions ≤ t
-
-
----
-
-### 4. Sequence Representation
-
-- Use the **last position hidden state**
-- Represents the entire sequence
-
----
-
-### 5. Prediction
-
-Score items using dot product:
-
-
-score = sequence_representation · item_embedding
-
-
----
-
-## Training
-
-### Objective
-
-Binary Cross Entropy with negative sampling:
-```
-- Positive: actual next item
-- Negative: randomly sampled item
-```
----
-
-### Optimization
-```
-- Optimizer: Adam
-- Early stopping based on validation NDCG@10
-- Gradient clipping applied
-```
----
-
-## Evaluation Metrics
-
-The model is evaluated using ranking metrics:
-```
-- Recall@10, Recall@20  
-- NDCG@10, NDCG@20  
-```
-### Evaluation Modes
-
-- `sampled`: rank target among sampled negatives (fast)
-
-- `full`: rank target among all unseen items (strict, slower)
-
----
-
-## Running the Project
-
-### Basic Run
+### 3. Run
 
 ```bash
 python main.py
 ```
 
-All experiments are defined in main.py:
-```
-experiment_configs = {
-    "config_small": { ... },
-    "config_deeper": { ... },
-}
-```
+That's it. Both experiment configurations will train sequentially and a
+comparison table is printed at the end.
 
-### Configurable Parameters
+---
 
-Model Architecture
-```
-hidden_dim — embedding size
-num_blocks — number of attention layers
-num_heads — number of attention heads
-max_seq_len — sequence length
-dropout — dropout rate
-```
-Training
-```
-lr — learning rate
-batch_size
-epochs
-early_stop_patience
-grad_clip
-```
-Evaluation
-```
-eval_mode — "sampled" or "full"
-eval_num_negatives — number of negatives (sampled mode)
-```
-Example Custom Config
-```
-"my_config": {
+## What the run does
+
+1. Loads and preprocesses `ratings.dat` (filters rating ≥ 4, min 5 interactions per user)
+2. Builds chronological sequences and applies leave-one-out splits
+3. Trains `config_small` (64-dim, 2 blocks, 2 heads, len=50)
+4. Trains `config_deeper` (128-dim, 3 blocks, 4 heads, len=100)
+5. Evaluates both on test set with **full ranking** (as required by the assignment)
+6. Prints a comparison table across all four architectural dimensions
+
+---
+
+## Configuration
+
+All knobs live in `main.py` inside `base_config` and `experiment_configs`.
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `hidden_dim` | 64 | Embedding / model width H |
+| `num_blocks` | 2 | Number of stacked SASRec blocks |
+| `num_heads` | 2 | Attention heads (must divide hidden_dim) |
+| `max_seq_len` | 50 | Input sequence length (truncated/padded to this) |
+| `dropout` | 0.2 | Dropout rate throughout |
+| `lr` | 1e-3 | Adam learning rate |
+| `weight_decay` | 1e-5 | L2 regularisation |
+| `epochs` | 50 | Max training epochs |
+| `early_stop_patience` | 5 | Stop if val NDCG@10 does not improve for N epochs |
+| `grad_clip` | 5.0 | Gradient norm clipping |
+| `eval_mode` | `"full"` | `"full"` = rank among all items; `"sampled"` = fast approx |
+
+### Adding a new experiment
+
+```python
+"config_wide": {
     **base_config,
-    "hidden_dim": 128,
-    "num_blocks": 4,
-    "num_heads": 4,
-    "max_seq_len": 100,
-    "dropout": 0.2,
-    "lr": 1e-3,
-}
+    "hidden_dim":  256,
+    "num_blocks":  2,
+    "num_heads":   8,
+    "max_seq_len": 50,
+},
 ```
-### Important Constraints
-hidden_dim must be divisible by num_heads
 
+> **Constraint**: `hidden_dim` must be divisible by `num_heads`.
+
+---
+
+## Bug fixes vs original code
+
+| File | Fix |
+|------|-----|
+| `dataset.py` | `set_seed` now calls `torch.cuda.manual_seed_all` (GPU reproducibility) |
+| `model.py` | FFN expanded to 4×hidden_dim (standard transformer capacity) |
+| `model.py` | Padding positions zeroed **before** the first block (prevents positional embedding leakage) |
+| `model.py` | Activation changed from ReLU → GELU (smoother, better for transformers) |
+| `model.py` | Padding embedding explicitly zeroed after `_reset_parameters` |
+| `train.py` | `weight_decay` default changed from `0.0` → `1e-5` (mild L2 regularisation) |
+| `main.py` | `eval_mode` changed from `"sampled"` → `"full"` (assignment requires full ranking) |
+
+---
+
+## Evaluation metrics
+
+| Metric | Description |
+|--------|-------------|
+| Recall@10 | 1 if target is in top-10, else 0 |
+| Recall@20 | 1 if target is in top-20, else 0 |
+| NDCG@10 | 1/log₂(rank+2) if rank < 10, else 0 |
+| NDCG@20 | 1/log₂(rank+2) if rank < 20, else 0 |
+
+Full-ranking mode ranks the target against **all unseen items**, which is the
+stricter and unbiased evaluation required by the assignment.
+
+---
+
+## Expected runtime (CPU)
+
+| Config | Approx. time per epoch |
+|--------|------------------------|
+| config_small (full eval) | ~3–5 min |
+| config_deeper (full eval) | ~5–8 min |
+
+Use `eval_mode: "sampled"` during development to iterate faster, then switch
+to `"full"` for final results.
