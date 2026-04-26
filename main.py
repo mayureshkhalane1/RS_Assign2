@@ -1,24 +1,18 @@
-"""
-main.py — Experiment orchestration for SASRec on MovieLens-1M.
+"""Train and compare SASRec configurations on MovieLens-1M.
 
 Usage
 -----
     python main.py
 
-The default run evaluates a required-settings suite and compares:
+Six configurations are run sequentially. Four isolate one architectural
+dimension at a time against a shared baseline:
 
-    config_base          — baseline
-    setting_num_blocks   — varies number of blocks
-    setting_hidden_dim   — varies hidden size
-    setting_num_heads    — varies attention heads
-    setting_max_seq_len  — varies maximum sequence length
-    config_deeper        — combined higher-capacity setting
-
-The suite covers all four architectural dimensions required by the assignment:
-    1. number of self-attention blocks
-    2. hidden size
-    3. number of attention heads
-    4. maximum sequence length
+    config_base         -- baseline (H=64,  B=2, heads=2, L=50)
+    setting_num_blocks  -- B=3  (all others at baseline)
+    setting_hidden_dim  -- H=128 (all others at baseline)
+    setting_num_heads   -- heads=4 (all others at baseline)
+    setting_max_seq_len -- L=100 (all others at baseline)
+    config_deeper       -- all dimensions increased (H=128, B=3, heads=4, L=100)
 """
 
 import os
@@ -41,15 +35,22 @@ from model import SASRec
 from train import run_train_loop
 
 
-# ---------------------------------------------------------------------------
-# DataLoader factory
-# ---------------------------------------------------------------------------
-
 def build_loaders(
     data_bundle: SequenceDataBundle,
     config: Dict[str, Any],
 ) -> tuple[DataLoader, DataLoader, DataLoader]:
-    """Return (train_loader, valid_loader, test_loader) for the given config."""
+    """Construct train, validation, and test DataLoaders for a given config.
+
+    Parameters
+    ----------
+    data_bundle : SequenceDataBundle
+    config : dict
+
+    Returns
+    -------
+    tuple[DataLoader, DataLoader, DataLoader]
+        ``(train_loader, valid_loader, test_loader)``.
+    """
     train_ds = SASRecTrainDataset(
         user_train=data_bundle.user_train,
         num_items=data_bundle.num_items,
@@ -71,31 +72,17 @@ def build_loaders(
         num_workers=config.get("num_workers", 0),
         pin_memory=config.get("pin_memory", False),
     )
-
     train_loader = DataLoader(
-        train_ds,
-        batch_size=config["batch_size"],
-        shuffle=True,
-        **loader_kwargs,
+        train_ds, batch_size=config["batch_size"], shuffle=True, **loader_kwargs
     )
     valid_loader = DataLoader(
-        valid_ds,
-        batch_size=config["eval_batch_size"],
-        shuffle=False,
-        **loader_kwargs,
+        valid_ds, batch_size=config["eval_batch_size"], shuffle=False, **loader_kwargs
     )
     test_loader = DataLoader(
-        test_ds,
-        batch_size=config["eval_batch_size"],
-        shuffle=False,
-        **loader_kwargs,
+        test_ds, batch_size=config["eval_batch_size"], shuffle=False, **loader_kwargs
     )
     return train_loader, valid_loader, test_loader
 
-
-# ---------------------------------------------------------------------------
-# Single experiment
-# ---------------------------------------------------------------------------
 
 def run_one_experiment(
     exp_name: str,
@@ -103,13 +90,22 @@ def run_one_experiment(
     data_bundle: SequenceDataBundle,
     device: torch.device,
 ) -> Dict[str, Any]:
-    """
-    Train and evaluate one SASRec configuration.
+    """Train and evaluate one SASRec configuration.
 
-    Returns a result dict suitable for ``print_comparison_table``.
+    Parameters
+    ----------
+    exp_name : str
+    config : dict
+    data_bundle : SequenceDataBundle
+    device : torch.device
+
+    Returns
+    -------
+    dict
+        Suitable for passing to ``print_comparison_table``.
     """
-    print("=" * 100)
-    print(f"Running experiment: {exp_name}")
+    print("=" * 80)
+    print(f"Experiment: {exp_name}")
     pprint.pprint(config)
 
     train_loader, valid_loader, test_loader = build_loaders(data_bundle, config)
@@ -122,9 +118,8 @@ def run_one_experiment(
         num_heads=config["num_heads"],
         dropout=config["dropout"],
     )
-
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Model parameters: {n_params:,}")
+    print(f"Parameters: {n_params:,}")
 
     train_result = run_train_loop(
         model=model,
@@ -147,34 +142,29 @@ def run_one_experiment(
     )
 
     result = {
-        "experiment":          exp_name,
-        "best_epoch":          train_result["best_epoch"],
-        "best_valid_NDCG@10":  train_result["best_valid_ndcg10"],
+        "experiment": exp_name,
+        "best_epoch": train_result["best_epoch"],
+        "best_valid_NDCG@10": train_result["best_valid_ndcg10"],
         **test_metrics,
-        "config":              deepcopy(config),
+        "config": deepcopy(config),
     }
-
-    print(f"\nFinished: {exp_name}")
+    print(f"\nDone: {exp_name}")
     print(result)
     return result
 
 
-# ---------------------------------------------------------------------------
-# Results display
-# ---------------------------------------------------------------------------
-
 def print_comparison_table(results: List[Dict[str, Any]]) -> None:
-    """Print a formatted comparison table of all experiment results."""
-    headers = [
-        "Experiment",
-        "BestEpoch",
-        "ValNDCG@10",
-        "TestRecall@10",
-        "TestRecall@20",
-        "TestNDCG@10",
-        "TestNDCG@20",
-    ]
+    """Print a plain-text comparison table of all experiment results.
 
+    Parameters
+    ----------
+    results : list[dict]
+        Each dict is the return value of ``run_one_experiment``.
+    """
+    headers = [
+        "Experiment", "BestEpoch", "ValNDCG@10",
+        "Recall@10", "Recall@20", "NDCG@10", "NDCG@20",
+    ]
     rows = [
         [
             r["experiment"],
@@ -187,79 +177,57 @@ def print_comparison_table(results: List[Dict[str, Any]]) -> None:
         ]
         for r in results
     ]
-
-    col_widths = [
-        max(len(str(x)) for x in col) for col in zip(headers, *rows)
-    ]
+    col_widths = [max(len(str(x)) for x in col) for col in zip(headers, *rows)]
 
     def fmt_row(row: list) -> str:
         return " | ".join(str(v).ljust(w) for v, w in zip(row, col_widths))
 
     sep = "-" * (sum(col_widths) + 3 * (len(headers) - 1))
-
-    print("\n" + "=" * 100)
-    print("Comparison Table")
-    print("=" * 100)
+    print("\n" + "=" * 80)
     print(fmt_row(headers))
     print(sep)
     for row in rows:
         print(fmt_row(row))
-    print("=" * 100 + "\n")
+    print("=" * 80 + "\n")
 
-    print("Assignment comparison dimensions:")
-    print("  1. number of self-attention blocks  (num_blocks)")
-    print("  2. hidden size                      (hidden_dim)")
-    print("  3. number of attention heads        (num_heads)")
-    print("  4. maximum sequence length          (max_seq_len)")
+    print("Ablation dimensions:")
+    print("  setting_num_blocks  -- B=3,    others at baseline")
+    print("  setting_hidden_dim  -- H=128,  others at baseline")
+    print("  setting_num_heads   -- heads=4, others at baseline")
+    print("  setting_max_seq_len -- L=100,  others at baseline")
+    print("  config_deeper       -- all dimensions increased")
 
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
 
 def main() -> None:
-    base_dir     = os.path.dirname(os.path.abspath(__file__))
+    base_dir = os.path.dirname(os.path.abspath(__file__))
     ratings_file = os.path.join(base_dir, "ratings.dat")
 
-    # ------------------------------------------------------------------
-    # Base configuration — shared by all experiments
-    # eval_mode="full" is required by the assignment rubric
-    # ------------------------------------------------------------------
     base_config: Dict[str, Any] = {
-        "seed":                42,
-        "batch_size":          256,
-        "eval_batch_size":     256,
-        "num_workers":         0,
-        "pin_memory":          torch.cuda.is_available(),
-
-        "max_seq_len":         50,
-        "hidden_dim":          64,
-        "num_blocks":          2,
-        "num_heads":           2,
-        "dropout":             0.2,
-
-        "lr":                  1e-3,
-        "weight_decay":        1e-5,    # FIX: was 0.0 — small L2 regularisation
-        "epochs":              50,
+        "seed": 42,
+        "batch_size": 256,
+        "eval_batch_size": 256,
+        "num_workers": 0,
+        "pin_memory": torch.cuda.is_available(),
+        "max_seq_len": 50,
+        "hidden_dim": 64,
+        "num_blocks": 2,
+        "num_heads": 2,
+        "dropout": 0.2,
+        "lr": 1e-3,
+        "weight_decay": 1e-5,
+        "epochs": 50,
         "early_stop_patience": 5,
-        "grad_clip":           5.0,
-
-        # FIX: was "sampled" — assignment requires full ranking evaluation
-        "eval_mode":           "full",
-        "eval_num_negatives":  100,     # only used when eval_mode="sampled"
+        "grad_clip": 5.0,
+        "eval_mode": "full",
+        "eval_num_negatives": 100,  # used only when eval_mode="sampled"
     }
 
-    # ------------------------------------------------------------------
-    # Experiment grid — varies one or more architectural dimensions
-    # ------------------------------------------------------------------
     experiment_configs: Dict[str, Dict[str, Any]] = {
+        # Baseline — all dimensions at their smaller values
         "config_base": {
             **base_config,
-            "hidden_dim":  64,
-            "num_blocks":  2,
-            "num_heads":   2,
-            "max_seq_len": 50,
         },
+        # Ablations — one dimension changed at a time
         "setting_num_blocks": {
             **base_config,
             "num_blocks": 3,
@@ -267,27 +235,27 @@ def main() -> None:
         "setting_hidden_dim": {
             **base_config,
             "hidden_dim": 128,
+            # num_heads=2 still divides 128, so no change needed here
         },
         "setting_num_heads": {
             **base_config,
             "num_heads": 4,
+            # hidden_dim=64, 4 heads → 16 dims/head (valid but tight)
         },
         "setting_max_seq_len": {
             **base_config,
             "max_seq_len": 100,
         },
+        # Combined — all dimensions at their larger values
         "config_deeper": {
             **base_config,
-            "hidden_dim":  128,
-            "num_blocks":  3,
-            "num_heads":   4,
+            "hidden_dim": 128,
+            "num_blocks": 3,
+            "num_heads": 4,
             "max_seq_len": 100,
         },
     }
 
-    # ------------------------------------------------------------------
-    # Setup
-    # ------------------------------------------------------------------
     set_seed(base_config["seed"])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
@@ -298,14 +266,11 @@ def main() -> None:
         min_user_interactions=5,
     )
     print(
-        f"Data loaded — users: {data_bundle.num_users}, "
+        f"Loaded -- users: {data_bundle.num_users}, "
         f"items: {data_bundle.num_items}, "
         f"train users: {len(data_bundle.user_train)}"
     )
 
-    # ------------------------------------------------------------------
-    # Run experiments
-    # ------------------------------------------------------------------
     all_results: List[Dict[str, Any]] = []
     for exp_name, config in experiment_configs.items():
         set_seed(config["seed"])

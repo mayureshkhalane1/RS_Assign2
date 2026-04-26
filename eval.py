@@ -1,20 +1,10 @@
-"""
-eval.py — Ranking-based evaluation for SASRec.
+"""Ranking-based evaluation for SASRec.
 
-Metrics
--------
-Recall@K  = 1  if target rank < K, else 0
-NDCG@K    = 1 / log₂(rank + 2)  if rank < K, else 0
+Two modes are supported:
+    full     -- rank the target against all items the user has not seen.
+    sampled  -- rank the target against ``num_negatives`` random unseen items.
 
-Both metrics use 0-based ranking (rank 0 = top-1).
-
-Evaluation modes
-----------------
-"full"     Rank target against ALL items the user has not yet seen.
-           Slower but required by the assignment rubric.
-
-"sampled"  Rank target against ``num_negatives`` randomly sampled unseen items.
-           Fast approximation; biased but common in the literature.
+All ranks are 0-based (rank 0 means the model placed the target first).
 """
 
 import math
@@ -25,23 +15,39 @@ import torch
 from torch.utils.data import DataLoader
 
 
-# ---------------------------------------------------------------------------
-# Metric helpers
-# ---------------------------------------------------------------------------
-
 def recall_at_k(rank: int, k: int) -> float:
-    """Return 1.0 if ``rank`` is in the top-K, else 0.0.  Rank is 0-based."""
+    """Return 1.0 if ``rank`` < k, else 0.0.
+
+    Parameters
+    ----------
+    rank : int
+        0-based rank of the target item.
+    k : int
+        Cutoff.
+
+    Returns
+    -------
+    float
+    """
     return 1.0 if rank < k else 0.0
 
 
 def ndcg_at_k(rank: int, k: int) -> float:
-    """Normalised discounted cumulative gain for a single query.  Rank is 0-based."""
+    """Return the normalised discounted cumulative gain for a single query.
+
+    Parameters
+    ----------
+    rank : int
+        0-based rank of the target item.
+    k : int
+        Cutoff.
+
+    Returns
+    -------
+    float
+    """
     return 1.0 / math.log2(rank + 2.0) if rank < k else 0.0
 
-
-# ---------------------------------------------------------------------------
-# Main evaluation function
-# ---------------------------------------------------------------------------
 
 @torch.no_grad()
 def evaluate_model(
@@ -54,92 +60,90 @@ def evaluate_model(
     num_negatives: int = 100,
     seed: int = 42,
 ) -> Dict[str, float]:
-    """
-    Evaluate ``model`` on validation or test data.
+    """Evaluate ``model`` and return average Recall@K and NDCG@K per user.
 
     Parameters
     ----------
-    model          : trained SASRec model
-    eval_loader    : DataLoader yielding (user, seq, target)
-    data_bundle    : SequenceDataBundle containing train_matrix and num_items
-    device         : torch device
-    k_list         : cutoffs for Recall@K and NDCG@K
-    eval_mode      : "full" (assignment requirement) or "sampled" (fast approx)
-    num_negatives  : number of negatives per user (sampled mode only)
-    seed           : RNG seed for reproducible negative sampling
+    model : torch.nn.Module
+        Trained SASRec model.
+    eval_loader : DataLoader
+        Yields ``(user, seq, target)`` batches.
+    data_bundle : SequenceDataBundle
+        Provides ``train_matrix`` for seen-item masking and ``num_items``.
+    device : torch.device
+    k_list : tuple of int
+        Cutoffs, e.g. ``(10, 20)``.
+    eval_mode : {'full', 'sampled'}
+        ``full`` ranks against all unseen items (required for the assignment).
+        ``sampled`` ranks against ``num_negatives`` randomly drawn unseen items.
+    num_negatives : int
+        Number of negatives per user in sampled mode.
+    seed : int
+        RNG seed for reproducible negative sampling.
 
     Returns
     -------
-    dict  e.g. {"Recall@10": 0.12, "NDCG@10": 0.08, "Recall@20": ..., ...}
+    dict[str, float]
+        Keys are ``Recall@K`` and ``NDCG@K`` for each k in ``k_list``.
     """
     model.eval()
     rng = random.Random(seed)
 
-    metric_sums: Dict[str, float] = {}
-    for k in k_list:
-        metric_sums[f"Recall@{k}"] = 0.0
-        metric_sums[f"NDCG@{k}"]   = 0.0
+    metric_sums: Dict[str, float] = {
+        f"{m}@{k}": 0.0 for m in ("Recall", "NDCG") for k in k_list
+    }
     user_count = 0
 
     for batch in eval_loader:
         users, seqs, targets = batch
-        users   = users.to(device)
-        seqs    = seqs.to(device)
+        users = users.to(device)
+        seqs = seqs.to(device)
         targets = targets.to(device)
-        B       = seqs.size(0)
+        B = seqs.size(0)
 
         if eval_mode == "sampled":
-            # Build per-user candidate list: [target] + [num_negatives negatives]
             candidate_list = []
             for i in range(B):
-                user   = users[i].item()
+                user = users[i].item()
                 target = targets[i].item()
-                seen   = data_bundle.train_matrix[user]
-
-                negatives: list = []
+                seen = data_bundle.train_matrix[user]
                 used = {target}
+                negatives = []
                 while len(negatives) < num_negatives:
                     neg = rng.randint(1, data_bundle.num_items)
                     if neg not in seen and neg not in used:
                         negatives.append(neg)
                         used.add(neg)
-
                 candidate_list.append([target] + negatives)
 
-            candidates   = torch.tensor(candidate_list, dtype=torch.long, device=device)
-            scores       = model.score_items(seqs, candidates)          # [B, 1+neg]
-            target_score = scores[:, 0].unsqueeze(1)                    # [B, 1]
-            # 0-based rank = number of candidates scored higher than target
-            rank = (scores > target_score).sum(dim=1)                   # [B]
+            candidates = torch.tensor(candidate_list, dtype=torch.long, device=device)
+            scores = model.score_items(seqs, candidates)
+            target_score = scores[:, 0].unsqueeze(1)
+            rank = (scores > target_score).sum(dim=1)
 
         elif eval_mode == "full":
-            # Score every item (1 … num_items)
             all_items = (
                 torch.arange(1, data_bundle.num_items + 1, device=device)
-                .unsqueeze(0).expand(B, -1)
+                .unsqueeze(0)
+                .expand(B, -1)
             )
-            scores = model.score_items(seqs, all_items)                 # [B, N]
+            scores = model.score_items(seqs, all_items)
 
-            # Mask seen items (except the target) with −∞
             for i in range(B):
-                user   = users[i].item()
+                user = users[i].item()
                 target = targets[i].item()
-                seen   = data_bundle.train_matrix[user]
-
-                # BUG FIX: explicitly exclude target from masking
+                seen = data_bundle.train_matrix[user]
                 to_mask = [it for it in seen if it != target]
                 if to_mask:
+                    # Items are 1-indexed; shift to 0-indexed for the score tensor.
                     idx = torch.tensor(
-                        [it - 1 for it in to_mask],   # 1-indexed → 0-indexed
-                        device=device,
-                        dtype=torch.long,
+                        [it - 1 for it in to_mask], device=device, dtype=torch.long
                     )
                     scores[i, idx] = -1e9
 
-            # Gather scores of the target items
-            target_idx   = (targets - 1).unsqueeze(1)                  # [B, 1]
-            target_score = scores.gather(1, target_idx)                 # [B, 1]
-            rank         = (scores > target_score).sum(dim=1)          # [B]
+            target_idx = (targets - 1).unsqueeze(1)
+            target_score = scores.gather(1, target_idx)
+            rank = (scores > target_score).sum(dim=1)
 
         else:
             raise ValueError(
@@ -149,7 +153,7 @@ def evaluate_model(
         for r in rank.tolist():
             for k in k_list:
                 metric_sums[f"Recall@{k}"] += recall_at_k(r, k)
-                metric_sums[f"NDCG@{k}"]   += ndcg_at_k(r, k)
+                metric_sums[f"NDCG@{k}"] += ndcg_at_k(r, k)
             user_count += 1
 
     if user_count == 0:
